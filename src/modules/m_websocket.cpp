@@ -426,36 +426,43 @@ class WebSocketHook final
 			LocalUser* luser = static_cast<UserIOHandler*>(sock)->user;
 			irc::sockets::sockaddrs realsa(luser->client_sa);
 
-			HTTPHeaderFinder proxyheader;
-			if (proxyheader.Find(recvq, "X-Real-IP:", 10, reqend) || proxyheader.Find(recvq, "X-Forwarded-For:", 16, reqend))
-			{
-				// Attempt to parse the proxy HTTP header.
-				if (!realsa.from_ip_port(proxyheader.ExtractValue(recvq), realsa.port()))
-				{
-					// The proxy header value contains a malformed value.
-					FailHandshake(sock, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n", "WebSocket: Received a proxied HTTP request that sent a malformed real IP address");
-					return -1;
-				}
-			}
-			else
-			{
-				// The proxy header is missing.
-				FailHandshake(sock, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n", "WebSocket: Received a proxied HTTP request that did not send a real IP address header");
-				return -1;
-			}
+			bool trusted_proxy = false;
 			for (const auto& proxyrange : config.proxyranges)
 			{
 				if (InspIRCd::MatchCIDR(luser->GetAddress(), proxyrange, ascii_case_insensitive_map))
 				{
-					// Give the user their real IP address.
-					if (realsa != luser->client_sa)
-						luser->ChangeRemoteAddress(realsa);
-
-					// Error if changing their IP gets them banned.
-					if (luser->quitting)
-						return -1;
+					trusted_proxy = true;
 					break;
 				}
+			}
+
+
+			if (trusted_proxy) {
+				HTTPHeaderFinder proxyheader;
+				if (proxyheader.Find(recvq, "X-Real-IP:", 10, reqend) || proxyheader.Find(recvq, "X-Forwarded-For:", 16, reqend))
+				{
+					// Attempt to parse the proxy HTTP header.
+					if (!realsa.from_ip_port(proxyheader.ExtractValue(recvq), realsa.port()))
+					{
+						// The proxy header value contains a malformed value.
+						FailHandshake(sock, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n", "WebSocket: Received a proxied HTTP request that sent a malformed real IP address");
+						return -1;
+					}
+				}
+				else
+				{
+					// The proxy header is missing.
+					FailHandshake(sock, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n", "WebSocket: Received a proxied HTTP request that did not send a real IP address header");
+					return -1;
+				}
+
+				// Give the user their real IP address.
+				if (realsa != luser->client_sa)
+					luser->ChangeRemoteAddress(realsa);
+
+				// Error if changing their IP gets them banned.
+				if (luser->quitting)
+					return -1;
 			}
 		}
 
